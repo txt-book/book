@@ -26,8 +26,10 @@ export function createBook(content: string, el: HTMLElement | string) {
 
   container.appendChild(paper);
 
-  let start = 0;
-  let lastLength = 0;
+  const currentPage: Page = {
+    start: 0,
+    length: 0,
+  };
 
   function getHeight() {
     return (
@@ -36,23 +38,39 @@ export function createBook(content: string, el: HTMLElement | string) {
     );
   }
 
-  function measureLength(start: number): number {
+  function measureLength(start: number, direction: 1 | -1 = 1): number {
     const measurePaper = paper;
     const lastColor = measurePaper.style.color;
     measurePaper.style.color = "transparent";
 
     const height = getHeight();
-    console.log(height);
-    let length = lastLength;
+    let length = currentPage.length;
     let lastHeight = 0;
 
     while (true) {
-      render(buildContent(content, { start, length }), measurePaper);
+      render(
+        buildContent(content, {
+          start: direction === 1 ? start : start - length,
+          length,
+        }),
+        measurePaper
+      );
       if (measurePaper.clientHeight <= height) {
         if (lastHeight > height) {
           break;
         }
-        length += 10;
+        if (direction === 1) {
+          if (length === content.length - start) {
+            break;
+          }
+          length = Math.min(length + 10, content.length - start);
+        } else {
+          if (length === start) {
+            measurePaper.style.color = lastColor;
+            return measureLength(0);
+          }
+          length = Math.min(length + 10, start);
+        }
       } else {
         lastHeight = measurePaper.clientHeight;
         length -= 1;
@@ -65,30 +83,32 @@ export function createBook(content: string, el: HTMLElement | string) {
   }
 
   function setConfig(config: Config): void {
-    start = config.start ?? start;
+    currentPage.start = config.start ?? currentPage.start;
     cfg.fontSize = config.fontSize ?? cfg.fontSize;
     paper.style.fontSize = `${cfg.fontSize}px`;
-    nextPage();
+
+    currentPage.length = measureLength(currentPage.start);
+    render(buildContent(content, currentPage), paper);
   }
 
   function prevPage(): void {
-    if (start < 0) {
+    if (currentPage.start <= 0) {
       return;
     }
-    const page = { start: start, length: measureLength(start) };
-    render(buildContent(content, page), paper);
-    emit("locationChanged", { startIndex: page.start });
-    start = start - page.length;
+    currentPage.length = measureLength(currentPage.start, -1);
+    currentPage.start = Math.max(currentPage.start - currentPage.length, 0);
+    render(buildContent(content, currentPage), paper);
+    emit("locationChanged", { startIndex: currentPage.start });
   }
 
   function nextPage(): void {
-    if (start >= content.length) {
+    if (currentPage.start + currentPage.length >= content.length) {
       return;
     }
-    const page = { start: start, length: measureLength(start) };
-    render(buildContent(content, page), paper);
-    emit("locationChanged", { startIndex: page.start });
-    start = start + page.length;
+    currentPage.start = currentPage.start + currentPage.length;
+    currentPage.length = measureLength(currentPage.start);
+    render(buildContent(content, currentPage), paper);
+    emit("locationChanged", { startIndex: currentPage.start });
   }
 
   function emit(event: Event, data: EventData<Event>) {
@@ -106,7 +126,7 @@ function render(content: string, paper: HTMLDivElement) {
   paper.innerHTML = content;
 }
 
-function buildContent(content: string, page: Page): string {
+function buildContent(content: string, page: Readonly<Page>): string {
   return content
     .slice(page.start, page.start + page.length)
     .replaceAll(" ", "&nbsp;")
